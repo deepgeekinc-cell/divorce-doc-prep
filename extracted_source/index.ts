@@ -7,7 +7,6 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { handleStripeWebhook } from "../webhooks/stripe";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -32,8 +31,11 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
   
-  // Stripe webhook MUST come before express.json() to preserve raw body
-  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+  // Stripe webhook route MUST come before express.json() to preserve raw body
+  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+    const { handleStripeWebhook } = await import("../webhooks/stripe");
+    return handleStripeWebhook(req, res);
+  });
   
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
