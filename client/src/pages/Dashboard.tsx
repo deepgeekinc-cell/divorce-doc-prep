@@ -59,6 +59,12 @@ export default function Dashboard() {
                 AI Assistant
               </Button>
             </Link>
+            <Link href="/settings">
+              <Button variant="ghost" size="sm">
+                <Settings className="h-4 w-4 mr-2" />
+                Settings
+              </Button>
+            </Link>
           </div>
         </div>
       </header>

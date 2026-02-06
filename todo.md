@@ -20,7 +20,7 @@
 - [x] Integrate Documents page with upload
 - [x] Integrate AI Assistant chat interface
 - [x] Integrate Pricing page
-- [ ] Integrate Settings page
+- [x] Integrate Settings page
 - [x] Update App.tsx with all routes
 
 ## Phase 3: Payment Gates & Stripe

@@ -11,6 +11,7 @@ import Documents from "./pages/Documents";
 import Assistant from "./pages/Assistant";
 import Pricing from "./pages/Pricing";
 import ShareAccess from "./pages/ShareAccess";
+import Settings from "./pages/Settings";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
       <Route path={"/documents"} component={Documents} />
       <Route path={"/assistant"} component={Assistant} />
       <Route path={"/pricing"} component={Pricing} />
+      <Route path={"/settings"} component={Settings} />
       <Route path={"/share/:token"} component={ShareAccess} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
