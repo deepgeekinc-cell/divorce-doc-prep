@@ -1,4 +1,4 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, 
@@ -382,13 +382,23 @@ export async function deleteAllUserData(userId: number): Promise<void> {
   }
 
   try {
+    // Get all share links for the user to delete associated logs
+    const userShareLinks = await db.select({ id: shareLinks.id }).from(shareLinks).where(eq(shareLinks.userId, userId));
+    const shareLinkIds = userShareLinks.map(link => link.id);
+
+    if (shareLinkIds.length > 0) {
+      await db.delete(shareAccessLog).where(inArray(shareAccessLog.shareLinkId, shareLinkIds));
+    }
+
     // Delete in order to respect foreign key constraints
+    await db.delete(shareLinks).where(eq(shareLinks.userId, userId));
     await db.delete(chatMessages).where(eq(chatMessages.userId, userId));
     await db.delete(checklistProgress).where(eq(checklistProgress.userId, userId));
     await db.delete(userDocuments).where(eq(userDocuments.userId, userId));
     await db.delete(userProfiles).where(eq(userProfiles.userId, userId));
-    // Note: We keep the user record in the users table for auth purposes
-    // but all personal data is removed
+
+    // Delete the user account itself
+    await db.delete(users).where(eq(users.id, userId));
   } catch (error) {
     console.error("[Database] Failed to delete user data:", error);
     throw error;
