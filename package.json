@@ -19,11 +19,18 @@
   },
   "homepage": "https://github.com/deepgeekinc-cell/divorce-doc-prep#readme",
   "devDependencies": {
+    "@types/fast-json-stable-stringify": "^2.0.0",
+    "@types/geojson": "^7946.0.16",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.1.1",
+    "@types/turf": "^3.5.32",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@turf/turf": "^7.3.5",
+    "fast-json-stable-stringify": "^2.1.0"
   }
 }

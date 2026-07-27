@@ -1,92 +1,68 @@
+import * as turf from '@turf/turf';
+import { FeatureCollection, Polygon, MultiPolygon } from 'geojson';
+
 export interface GpsCoordinates {
     latitude: number;
     longitude: number;
 }
 
-export interface Geofence {
-    id: string;
-    description: string;
-    /**
-     * For simplicity in this simulation, a geofence is defined by a central point and a radius (in meters).
-     * In production, this would be complex polygons representing 11-digit Census Bureau GEOIDs.
-     */
-    center: GpsCoordinates;
-    radiusMeters: number;
-}
-
 export interface AssetLocationData {
     assetId: string;
-    timestamp: Date;
+    timestamp: string;
     coordinates: GpsCoordinates;
 }
 
 /**
- * Section 30C & 48 GIS Mapping & Geofencing Simulator
+ * Section 30C & 48 GIS Mapping & Geofencing
  *
- * Secures the statutory vulnerability of location by ensuring assets remain strictly
- * within approved Department of Energy census tracts.
+ * Enforces hardware location strict compliance by cross-referencing continuous GPS telemetry
+ * against the Department of Energy's approved low-income or non-urban 11-digit census tracts.
  */
 export class GisShield {
-    private approvedGeofences: Geofence[] = [];
+    private approvedTracts: FeatureCollection<Polygon | MultiPolygon> | null = null;
 
     /**
-     * Loads the authorized geofences (e.g., DOE approved low-income/non-urban census tracts).
+     * Loads the exact DOE-approved census tracts as a GeoJSON FeatureCollection.
+     * These polygons represent the statutory boundaries (e.g., 11-digit GEOIDs).
      */
-    public loadApprovedGeofences(geofences: Geofence[]) {
-        this.approvedGeofences = geofences;
+    public loadApprovedCensusTracts(geoJson: FeatureCollection<Polygon | MultiPolygon>) {
+        this.approvedTracts = geoJson;
     }
 
     /**
-     * Calculates the distance between two GPS coordinates using the Haversine formula.
-     * Returns the distance in meters.
-     */
-    private calculateDistance(coord1: GpsCoordinates, coord2: GpsCoordinates): number {
-        const R = 6371e3; // Earth's radius in meters
-        const φ1 = coord1.latitude * Math.PI / 180;
-        const φ2 = coord2.latitude * Math.PI / 180;
-        const Δφ = (coord2.latitude - coord1.latitude) * Math.PI / 180;
-        const Δλ = (coord2.longitude - coord1.longitude) * Math.PI / 180;
-
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                  Math.cos(φ1) * Math.cos(φ2) *
-                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-        return R * c;
-    }
-
-    /**
-     * Checks if the asset's current location strictly complies with approved geofences.
-     * Flags a statutory breach if out of bounds.
+     * Verifies if the asset's current GPS location falls strictly within an approved census tract.
      */
     public verifyLocationCompliance(locationData: AssetLocationData): {
         compliant: boolean;
-        distanceToCenter?: number;
-        matchedGeofenceId?: string;
+        geoid?: string;
         error?: string;
     } {
-        if (this.approvedGeofences.length === 0) {
-            return { compliant: false, error: "No approved geofences loaded." };
+        if (!this.approvedTracts) {
+            return { compliant: false, error: "CRITICAL: Approved Census Tracts (GeoJSON) not loaded into GIS Shield." };
         }
 
-        for (const geofence of this.approvedGeofences) {
-            const distance = this.calculateDistance(locationData.coordinates, geofence.center);
+        // Create a GeoJSON Point for the asset's current telemetry coordinates
+        const assetPoint = turf.point([locationData.coordinates.longitude, locationData.coordinates.latitude]);
 
-            // If the asset is within the radius of this geofence, it is compliant.
-            if (distance <= geofence.radiusMeters) {
+        // Cross-reference against all approved polygons
+        for (const feature of this.approvedTracts.features) {
+            // Note: booleanPointInPolygon strictly evaluates if a point resides inside the geometry
+            const isInside = turf.booleanPointInPolygon(assetPoint, feature);
+
+            if (isInside) {
+                // If the tract has properties (like an 11-digit GEOID), extract it for the audit log
+                const geoid = feature.properties ? feature.properties['GEOID'] : 'UNKNOWN_GEOID';
                 return {
                     compliant: true,
-                    distanceToCenter: distance,
-                    matchedGeofenceId: geofence.id
+                    geoid
                 };
             }
         }
 
-        // Statutory Breach: The asset is outside all approved geofences.
+        // If the loop completes without a match, the asset has breached statutory boundaries.
         return {
             compliant: false,
-            error: "STATUTORY BREACH: Asset located outside of approved census tracts."
+            error: "STATUTORY BREACH: Asset telemetry reports location outside of approved IRS Section 30C/48 census tracts."
         };
     }
 }

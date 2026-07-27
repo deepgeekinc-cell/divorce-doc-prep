@@ -1,97 +1,117 @@
-import { ContinuousComplianceLedger, SIEMS1Payload } from './ledger';
-import { Geofence } from './gis';
+import { ContinuousComplianceLedger, SIEMS1Event } from './ledger';
+import { FeatureCollection, Polygon } from 'geojson';
 
-describe('Continuous Compliance Ledger (SIEMS-1)', () => {
+describe('Continuous Compliance Ledger (Production Posture)', () => {
     let ledger: ContinuousComplianceLedger;
-    const testGeofence: Geofence = {
-        id: 'CENSUS-TRACT-123',
-        description: 'DOE Low-Income Tract',
-        center: { latitude: 33.8358, longitude: -118.3406 }, // Torrance roughly
-        radiusMeters: 5000 // 5km radius
+
+    // A mock 11-digit GEOID tract (Square polygon spanning coordinates around Torrance)
+    const productionTracts: FeatureCollection<Polygon> = {
+        type: 'FeatureCollection',
+        features: [
+            {
+                type: 'Feature',
+                properties: {
+                    GEOID: '06037651001' // Standard 11-digit Census Tract Format
+                },
+                geometry: {
+                    type: 'Polygon',
+                    coordinates: [[
+                        [-118.35, 33.82],
+                        [-118.33, 33.82],
+                        [-118.33, 33.85],
+                        [-118.35, 33.85],
+                        [-118.35, 33.82] // Close the polygon
+                    ]]
+                }
+            }
+        ]
     };
 
     beforeEach(() => {
         ledger = new ContinuousComplianceLedger();
-        ledger.configureGeofences([testGeofence]);
+        ledger.initializeGeospatialBoundaries(productionTracts);
     });
 
-    test('should validate compliance when asset is within geofence and generates positive wattage', () => {
-        const payload: SIEMS1Payload = {
-            assetId: 'ASSET-TORRANCE-01',
+    test('should return a COMPLIANT audit log when physics and geospatial parameters align', () => {
+        const event: SIEMS1Event = {
+            assetId: 'HW-ASSET-001',
             telemetry: {
-                deviceId: 'METER-01',
-                timestamp: new Date(),
+                deviceId: 'ANSI-METER-X1',
+                timestamp: new Date().toISOString(),
                 wattage: 15000,
                 capacity: 50000,
                 voltage: 480,
-                current: 31.25
+                current: 31.25,
+                meterAccuracyClass: 'ANSI C12.20 Class 0.2' // IRS Production requirement
             },
             location: {
-                assetId: 'ASSET-TORRANCE-01',
-                timestamp: new Date(),
-                coordinates: { latitude: 33.8360, longitude: -118.3400 } // Well within 5km
+                assetId: 'HW-ASSET-001',
+                timestamp: new Date().toISOString(),
+                coordinates: { latitude: 33.84, longitude: -118.34 } // Inside Polygon
             }
         };
 
-        const result = ledger.evaluateCompliance(payload);
+        const log = ledger.processEvent(event);
 
-        expect(result.isCompliant).toBe(true);
-        expect(result.errors.length).toBe(0);
-        expect(result.creditsValidated).toContain('30C');
-        expect(result.creditsValidated).toContain('45X');
-        expect(result.meteringRecord).toBeDefined();
-        expect(result.meteringRecord?.hash).toBeDefined();
+        expect(log.statutoryStatus).toBe('COMPLIANT');
+        expect(log.complianceViolations.length).toBe(0);
+        expect(log.validatedCredits).toEqual(expect.arrayContaining(['30C', '48', '45X', '45V']));
+        expect(log.locationGeoidContext).toBe('06037651001');
+        expect(log.meteringLedgerEntry).toBeDefined();
+        expect(log.meteringLedgerEntry?.hash).toBeDefined();
     });
 
-    test('should flag statutory breach when asset moves outside of approved geofence', () => {
-        const payload: SIEMS1Payload = {
-            assetId: 'ASSET-TORRANCE-01',
+    test('should flag a STATUTORY BREACH when asset telemetry falls outside the 11-digit GEOID boundary', () => {
+        const event: SIEMS1Event = {
+            assetId: 'HW-ASSET-001',
             telemetry: {
-                deviceId: 'METER-01',
-                timestamp: new Date(),
+                deviceId: 'ANSI-METER-X1',
+                timestamp: new Date().toISOString(),
                 wattage: 15000,
                 capacity: 50000,
                 voltage: 480,
-                current: 31.25
+                current: 31.25,
+                meterAccuracyClass: 'ANSI C12.20 Class 0.2'
             },
             location: {
-                assetId: 'ASSET-TORRANCE-01',
-                timestamp: new Date(),
-                coordinates: { latitude: 34.0522, longitude: -118.2437 } // Los Angeles downtown (~25km away, out of bounds)
+                assetId: 'HW-ASSET-001',
+                timestamp: new Date().toISOString(),
+                coordinates: { latitude: 34.05, longitude: -118.25 } // Outside Polygon (Downtown LA)
             }
         };
 
-        const result = ledger.evaluateCompliance(payload);
+        const log = ledger.processEvent(event);
 
-        expect(result.isCompliant).toBe(false);
-        expect(result.errors[0]).toContain('STATUTORY BREACH');
-        expect(result.creditsValidated).not.toContain('30C');
-        expect(result.creditsValidated).toContain('45X'); // Telemetry still fine
+        expect(log.statutoryStatus).toBe('BREACH');
+        expect(log.complianceViolations[0]).toContain('STATUTORY BREACH');
+        expect(log.validatedCredits).not.toContain('30C');
+        expect(log.validatedCredits).toContain('45X');
     });
 
-    test('should flag violation when telemetry reports zero wattage', () => {
-        const payload: SIEMS1Payload = {
-            assetId: 'ASSET-TORRANCE-01',
+    test('should flag a BREACH when physics telemetry fails validation (e.g. non-ANSI metadata)', () => {
+        const event: SIEMS1Event = {
+            assetId: 'HW-ASSET-001',
             telemetry: {
-                deviceId: 'METER-01',
-                timestamp: new Date(),
-                wattage: 0,
+                deviceId: 'MOCK-METER',
+                timestamp: new Date().toISOString(),
+                wattage: 15000,
                 capacity: 50000,
                 voltage: 480,
-                current: 0
+                current: 31.25,
+                meterAccuracyClass: 'Generic Smart Meter' // Fails IRS ANSI strictness
             },
             location: {
-                assetId: 'ASSET-TORRANCE-01',
-                timestamp: new Date(),
-                coordinates: { latitude: 33.8360, longitude: -118.3400 }
+                assetId: 'HW-ASSET-001',
+                timestamp: new Date().toISOString(),
+                coordinates: { latitude: 33.84, longitude: -118.34 }
             }
         };
 
-        const result = ledger.evaluateCompliance(payload);
+        const log = ledger.processEvent(event);
 
-        expect(result.isCompliant).toBe(false);
-        expect(result.errors[0]).toContain('Zero or negative power generation');
-        expect(result.creditsValidated).toContain('30C');
-        expect(result.creditsValidated).not.toContain('45X');
+        expect(log.statutoryStatus).toBe('BREACH');
+        expect(log.complianceViolations[0]).toContain('lacks certified ANSI C12.20');
+        expect(log.validatedCredits).toContain('30C');
+        expect(log.validatedCredits).not.toContain('45X');
     });
 });
